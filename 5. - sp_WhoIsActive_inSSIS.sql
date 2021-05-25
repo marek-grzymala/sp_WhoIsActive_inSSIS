@@ -1,5 +1,5 @@
 /*********************************************************************************************
-sp_WhoIsActive_inSSIS v0.02 (2021-04-21)
+sp_WhoIsActive_inSSIS v0.03 (2021-04-21)
 (C) 2021, Marek Grzymala
 
 Feedback: https://www.linkedin.com/in/marek-grzymala-sql/
@@ -46,11 +46,11 @@ SELECT
                but never runs MORE THAN ONCE DAILY calculate the StartTime Avg, Lower/Upper Percentiles for that package */
             ,CASE WHEN 
                  (rd.[RunsOnceDaily] = 1) OR (rd.[RunsOnceDaily] = 0 AND rd.[RanMoreThanOnceDaily] = 0 AND rd.[HowManyTimesDidItRun] >= (@DaysBack*(-1))-@DaysMargin) 
-                 THEN hstavg.[StartTimeAvg]   ELSE NULL
+                 THEN hstavg_start_time.[StartTimeAvg]   ELSE NULL
              END                                                                           AS [StartTimeAvg]
             ,CASE WHEN 
                  (rd.[RunsOnceDaily] = 1) OR (rd.[RunsOnceDaily] = 0 AND rd.[RanMoreThanOnceDaily] = 0 AND rd.[HowManyTimesDidItRun] >= (@DaysBack*(-1))-@DaysMargin) 
-                 THEN DATEDIFF(MINUTE, CAST(ei.start_time AS TIME(0)), hstavg.[StartTimeAvg])   
+                 THEN DATEDIFF(MINUTE, CAST(ei.start_time AS TIME(0)), hstavg_start_time.[StartTimeAvg])   
                  ELSE NULL
              END                                                                          AS [StartTime Behind/AheadOf Avg]
             ,CASE WHEN 
@@ -68,11 +68,11 @@ SELECT
             ,CASE WHEN (rd.[RunsOnceDaily] = 1) OR (rd.[RunsOnceDaily] = 0 AND rd.[RanMoreThanOnceDaily] = 0 AND rd.[HowManyTimesDidItRun] >= (@DaysBack*(-1))-@DaysMargin) 
                   THEN prcnt.[TimeEnd_PercUpper]   ELSE NULL 
              END                                                                          AS [TimeEnd_PercUpper]
-            ,CAST(DATEADD(MINUTE, hstavg.[DurationAvgMinutes], ei.start_time) AS TIME(0)) AS [ExpctEndTime]
+            ,CAST(DATEADD(MINUTE, hstavg_duration.[DurationAvgMinutes], ei.start_time) AS TIME(0)) AS [ExpctEndTime]
 
             /* Duration Results: */
             ,DATEDIFF(MINUTE, CAST(ei.start_time AS DATETIME2(0)), GETDATE())  AS [Duration_Current(minutes)]
-            ,(hstavg.[DurationAvgMinutes] - (DATEDIFF(MINUTE, CAST(ei.start_time AS DATETIME2(0)), GETDATE()))) AS [Currently Behind/AheadOf Avg.Duration]
+            ,(hstavg_duration.[DurationAvgMinutes] - (DATEDIFF(MINUTE, CAST(ei.start_time AS DATETIME2(0)), GETDATE()))) AS [Currently Behind/AheadOf Avg.Duration]
             ,prcnt.[Duration_PercLower]
             ,prcnt.[Duration_PercUpper]
 
@@ -108,9 +108,15 @@ OUTER APPLY (
                          [ProjectName]
                         ,[PackageName]
                         ,[DurationAvgMinutes]
+                FROM    dbo.ufn_GetPackageHistAvg_Duration_PerPackageName_ExclOutliers(ei.project_name, ei.package_name, prcnt.Duration_PercLower, prcnt.Duration_PercUpper, @DaysBack, GETDATE())
+            )   AS      hstavg_duration
+OUTER APPLY (
+                SELECT 
+                         [ProjectName]
+                        ,[PackageName]
                         ,[StartTimeAvg]
-                FROM    dbo.ufn_GetPackageHistAvg_PerPackageName_ExclOutliers(ei.project_name, ei.package_name, prcnt.Duration_PercLower, prcnt.Duration_PercUpper, @DaysBack, GETDATE())
-            )   AS      hstavg
+                FROM    dbo.ufn_GetPackageHistAvg_StartTime_PerPackageName_ExclOutliers(ei.project_name, ei.package_name, prcnt.TimeStart_PercLower, prcnt.TimeStart_PercUpper, @DaysBack, GETDATE())
+            )   AS      hstavg_start_time
 
 WHERE      ei.status = 2 -- Currently Running
 AND        ei.project_name NOT IN (SELECT LTRIM([value]) FROM STRING_SPLIT(@ProjectsToIgnore, ','))
