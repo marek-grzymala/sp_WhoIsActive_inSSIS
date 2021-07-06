@@ -1,5 +1,5 @@
 /*********************************************************************************************
-sp_WhoIsActive_inSSIS v0.04 (2021-06-02)
+sp_WhoIsActive_inSSIS v0.05 (2021-07-06)
 (C) 2021, Marek Grzymala
 
 Feedback: https://www.linkedin.com/in/marek-grzymala-sql/
@@ -22,18 +22,43 @@ SET QUOTED_IDENTIFIER ON
 GO
 CREATE OR ALTER PROCEDURE [dbo].[sp_WhoIsActive_inSSIS]
        
-        @PercentileLower FLOAT = 0.2         /* percentile BELOW WHICH we are excluding the outliers from the stats calculation */
-       ,@PercentileUpper FLOAT = 0.8         /* percentile ABOVE WHICH we are excluding the outliers from the stats calculation */
-       ,@DaysBack INT = -30                  /* the range (in days) of how far back we are calculating the duration/start-time statistics */
-       ,@DaysMargin INT = 10                 /* if a package execution is missing some days within the range of @DaysBack 
-                                               but never runs MORE THAN ONCE DAILY this is the max. number of skipped days 
-                                               still allowed to calculate the StartTime Avg, Lower/Upper Percentiles for that package */
-       ,@ProjectsToIgnore NVARCHAR(MAX) = 'Dyn_Dyn_Orchestration'                   /* comma-separated names of projects you want to ignore in the list */
-       ,@PackagesToIgnore NVARCHAR(MAX) = 'Orchestration.dtsx, ParallelStream.dtsx' /* comma-separated names of packages you want to ignore in the list */
+        @PercentileLower FLOAT = 0.2                /* percentile BELOW WHICH we are excluding the outliers from the stats calculation */
+       ,@PercentileUpper FLOAT = 0.8                /* percentile ABOVE WHICH we are excluding the outliers from the stats calculation */
+       ,@DateForWhichToCollectStats DATE = NULL     /* supply a date if you want to calculate stats not for currently running packages but for an earlier date in the past */
+       ,@DaysBack INT = -30                         /* the range (in days) of how far back we are calculating the duration/start-time statistics */
+       ,@DaysMargin INT = 10                        /* if a package execution is missing some days within the range of @DaysBack 
+                                                      but never runs MORE THAN ONCE DAILY this is the max. number of skipped days 
+                                                      still allowed to calculate the StartTime Avg, Lower/Upper Percentiles for that package */
+       
+       ,@ProjectsToIgnore NVARCHAR(MAX) = 'Dyn_Dyn_Orchestration'                   /* comma-separated names of projects you want to ignore in the output */
+       ,@PackagesToIgnore NVARCHAR(MAX) = 'Orchestration.dtsx, ParallelStream.dtsx' /* comma-separated names of packages you want to ignore in the output */
 AS
 BEGIN
 
-DECLARE @EndDate DATETIME = GETDATE() /* change if you want to limit the stats calculation to an earlier date in the past */
+/* parameter validation section: */
+
+IF (@PercentileLower IS NULL OR ISNUMERIC(@PercentileLower) = 0 OR @PercentileLower < 0 OR @PercentileLower > 1) OR (@PercentileUpper IS NULL OR ISNUMERIC(@PercentileUpper) = 0 OR @PercentileUpper < 0 OR @PercentileUpper > 1)
+BEGIN;
+	RAISERROR('Input parameters: @PercentileLower and @PercentileUpper must be a NON-NULL positive floats between 0 and 1', 16, 1);
+	RETURN;
+END;
+
+IF (@DaysBack IS NULL OR ISNUMERIC(@DaysBack) = 0 OR @DaysBack >= 0)
+BEGIN;
+	RAISERROR('Input parameter @DaysBack must be a NON-NULL negative integer', 16, 1);
+	RETURN;
+END;
+
+IF (@DaysMargin IS NULL OR ISNUMERIC(@DaysMargin) = 0 OR @DaysMargin < 1)
+BEGIN;
+	RAISERROR('Input parameter @DaysMargin must be a NON-NULL positive integer', 16, 1);
+	RETURN;
+END;
+
+/* end of parameter validation section */
+
+DECLARE @EndDate DATETIME = GETDATE() 
+
 SELECT
              ei.execution_id
             ,ei.project_name
@@ -103,8 +128,8 @@ OUTER APPLY (
             AND     ei_prcnt.project_name = ei.project_name
             AND     ei_prcnt.package_name = ei.package_name
             AND     ei_prcnt.status = 7 /* Success (we want to calculate stats on successfull runs only)  */ 
-            AND     ei_prcnt.start_time >= DATEADD(DAY, @DaysBack, CAST(CAST(@EndDate+1 AS DATE) AS DATETIME)) /* cast the date to midnight next day minus @DaysBack */ 
-            AND     ei_prcnt.end_time < CAST(CAST(@EndDate+1 AS DATE) AS DATETIME) /* cast the date to midnight next day */ 
+            AND     ei_prcnt.start_time >= DATEADD(DAY, @DaysBack, CAST(CAST(@EndDate+1 AS DATE) AS DATETIME)) /* start at midnight next day of @EndDate minus @DaysBack */ 
+            AND     ei_prcnt.end_time < CAST(CAST(@EndDate+1 AS DATE) AS DATETIME) /* stop at midnight next day of @EndDate */ 
             ) AS    prcnt
 /* ----------------------------- Function to find if the PackageRunsOnceDaily: ----------------------------- */
 OUTER APPLY (
@@ -130,8 +155,8 @@ OUTER APPLY (
                           WHERE    1 = 1
                           AND      ei_rd.project_name = ei.project_name
                           AND      ei_rd.package_name = ei.package_name
-                          AND      ei_rd.start_time >= DATEADD(DAY, @DaysBack , GETDATE())
-                          AND      ei_rd.end_time <= @EndDate
+                          AND      ei_rd.start_time >= DATEADD(DAY, @DaysBack, CAST(CAST(@EndDate+1 AS DATE) AS DATETIME)) /* start at midnight next day of @EndDate minus @DaysBack */  
+                          AND      ei_rd.end_time < CAST(CAST(@EndDate+1 AS DATE) AS DATETIME) /* stop at midnight next day of @EndDate */
                           AND      ei_rd.status = 7 -- Success (we want to calculate stats on successfull runs only)  
                           GROUP BY CAST(ei_rd.start_time AS DATE), ei_rd.project_name, ei_rd.package_name
                       )   AS DistCnt
@@ -151,8 +176,8 @@ OUTER APPLY (
             AND         ei_hst_av_dur.project_name = ei.project_name
             AND         ei_hst_av_dur.package_name = ei.package_name
             AND         ei_hst_av_dur.status = 7 /* Success (we want to calculate stats on successfull runs only)   */ 
-            AND         ei_hst_av_dur.start_time >= DATEADD(DAY, @DaysBack, CAST(CAST(@EndDate+1 AS DATE) AS DATETIME)) /* Cast the date to midnight next day minus @DaysBack */ 
-            AND         ei_hst_av_dur.end_time < CAST(CAST(@EndDate+1 AS DATE) AS DATETIME) /* CAST the date to midnight next day */
+            AND         ei_hst_av_dur.start_time >= DATEADD(DAY, @DaysBack, CAST(CAST(@EndDate+1 AS DATE) AS DATETIME)) /* start at midnight next day of @EndDate minus @DaysBack */  
+            AND         ei_hst_av_dur.end_time < CAST(CAST(@EndDate+1 AS DATE) AS DATETIME) /* stop at midnight next day of @EndDate */
             /* Here we are excluding duration outliers: */
             AND         DATEDIFF(MINUTE, ei_hst_av_dur.start_time, ei_hst_av_dur.end_time) >= prcnt.Duration_PercLower
             AND         DATEDIFF(MINUTE, ei_hst_av_dur.start_time, ei_hst_av_dur.end_time) <= prcnt.Duration_PercUpper
@@ -169,8 +194,8 @@ OUTER APPLY (
             AND         ei_hst_av_strt.project_name = ei.project_name
             AND         ei_hst_av_strt.package_name = ei.package_name
             AND         ei_hst_av_strt.status = 7 /* Success (we want to calculate stats on successfull runs only)   */ 
-            AND         ei_hst_av_strt.start_time >= DATEADD(DAY, @DaysBack, CAST(CAST(@EndDate+1 AS DATE) AS DATETIME)) /* Cast the date to midnight next day minus @DaysBack */ 
-            AND         ei_hst_av_strt.end_time < CAST(CAST(@EndDate+1 AS DATE) AS DATETIME) /* Cast the date to midnight next day */
+            AND         ei_hst_av_strt.start_time >= DATEADD(DAY, @DaysBack, CAST(CAST(@EndDate+1 AS DATE) AS DATETIME)) /* start at midnight next day of @EndDateminus @DaysBack */ 
+            AND         ei_hst_av_strt.end_time < CAST(CAST(@EndDate+1 AS DATE) AS DATETIME) /* stop at midnight next day of @EndDate */
             /* Here we are excluding start-time outliers: */
             AND         CAST(ei_hst_av_strt.start_time AS TIME(0)) >= prcnt.TimeStart_PercLower
             AND         CAST(ei_hst_av_strt.start_time AS TIME(0)) <= prcnt.TimeStart_PercUpper
@@ -181,5 +206,6 @@ AND        ei.project_name NOT IN (SELECT LTRIM([value]) FROM STRING_SPLIT(@Proj
 AND        ei.package_name NOT IN (SELECT LTRIM([value]) FROM STRING_SPLIT(@PackagesToIgnore, ','))
 
 ORDER BY   ei.execution_id DESC 
+
 END
 GO
