@@ -1,5 +1,5 @@
 /*********************************************************************************************
-sp_WhoIsActive_inSSIS v0.05 (2021-07-06)
+sp_WhoIsActive_inSSIS v0.06 (2021-07-23)
 (C) 2021, Marek Grzymala
 
 Feedback: https://www.linkedin.com/in/marek-grzymala-sql/
@@ -57,7 +57,8 @@ END;
 
 /* end of parameter validation section */
 
-DECLARE @EndDate DATETIME = GETDATE() 
+DECLARE     @EndDate DATE = GETDATE()+1 /* stop at midnight next day of today */  
+DECLARE     @StartDate DATE = DATEADD(DAY, @DaysBack, @EndDate) /* start at midnight next day of @EndDate minus @DaysBack */ 
 
 SELECT
              ei.execution_id
@@ -107,7 +108,7 @@ SELECT
             ,rd.[HowManyTimesDidItRun]
 
 FROM        [SSISDB].internal.execution_info ei
-/* ----------------------------- Function to GetPackageHistPercentiles_PerPackageName: ----------------------------- */
+/* ----------------------------- [prcnt] - Function to GetPackageHistPercentiles_PerPackageName: ----------------------------- */
 OUTER APPLY (
             SELECT  TOP 1 
             
@@ -128,10 +129,10 @@ OUTER APPLY (
             AND     ei_prcnt.project_name = ei.project_name
             AND     ei_prcnt.package_name = ei.package_name
             AND     ei_prcnt.status = 7 /* Success (we want to calculate stats on successfull runs only)  */ 
-            AND     ei_prcnt.start_time >= DATEADD(DAY, @DaysBack, CAST(CAST(@EndDate+1 AS DATE) AS DATETIME)) /* start at midnight next day of @EndDate minus @DaysBack */ 
-            AND     ei_prcnt.end_time < CAST(CAST(@EndDate+1 AS DATE) AS DATETIME) /* stop at midnight next day of @EndDate */ 
+            AND     ei_prcnt.start_time >= @StartDate
+            AND     ei_prcnt.end_time < @EndDate 
             ) AS    prcnt
-/* ----------------------------- Function to find if the PackageRunsOnceDaily: ----------------------------- */
+/* ----------------------------- [rd] - Function to find if the PackageRunsOnceDaily: ----------------------------- */
 OUTER APPLY (
             SELECT 
                       DistCnt.project_name AS [ProjectName],
@@ -155,8 +156,8 @@ OUTER APPLY (
                           WHERE    1 = 1
                           AND      ei_rd.project_name = ei.project_name
                           AND      ei_rd.package_name = ei.package_name
-                          AND      ei_rd.start_time >= DATEADD(DAY, @DaysBack, CAST(CAST(@EndDate+1 AS DATE) AS DATETIME)) /* start at midnight next day of @EndDate minus @DaysBack */  
-                          AND      ei_rd.end_time < CAST(CAST(@EndDate+1 AS DATE) AS DATETIME) /* stop at midnight next day of @EndDate */
+                          AND      ei_rd.start_time >= @StartDate
+                          AND      ei_rd.end_time < @EndDate 
                           AND      ei_rd.status = 7 -- Success (we want to calculate stats on successfull runs only)  
                           GROUP BY CAST(ei_rd.start_time AS DATE), ei_rd.project_name, ei_rd.package_name
                       )   AS DistCnt
@@ -164,7 +165,7 @@ OUTER APPLY (
                       DistCnt.project_name,
                       DistCnt.package_name
             ) AS      rd
-/* ----------------------------- Function to GetPackageHistAvg_Duration_PerPackageName_ExclOutliers: ----------------------------- */
+/* ----------------------------- [hstavg_duration] - Function to GetPackageHistAvg_Duration_PerPackageName_Excluding_Outliers: ----------------------------- */
 OUTER APPLY (
             SELECT       
                          ei.project_name AS [ProjectName]
@@ -176,26 +177,26 @@ OUTER APPLY (
             AND         ei_hst_av_dur.project_name = ei.project_name
             AND         ei_hst_av_dur.package_name = ei.package_name
             AND         ei_hst_av_dur.status = 7 /* Success (we want to calculate stats on successfull runs only)   */ 
-            AND         ei_hst_av_dur.start_time >= DATEADD(DAY, @DaysBack, CAST(CAST(@EndDate+1 AS DATE) AS DATETIME)) /* start at midnight next day of @EndDate minus @DaysBack */  
-            AND         ei_hst_av_dur.end_time < CAST(CAST(@EndDate+1 AS DATE) AS DATETIME) /* stop at midnight next day of @EndDate */
+            AND         ei_hst_av_dur.start_time >= @StartDate
+            AND         ei_hst_av_dur.end_time < @EndDate
             /* Here we are excluding duration outliers: */
             AND         DATEDIFF(MINUTE, ei_hst_av_dur.start_time, ei_hst_av_dur.end_time) >= prcnt.Duration_PercLower
             AND         DATEDIFF(MINUTE, ei_hst_av_dur.start_time, ei_hst_av_dur.end_time) <= prcnt.Duration_PercUpper
 )   AS      hstavg_duration
-/* ----------------------------- Function to GetPackageHistAvg_StartTime_PerPackageName_ExclOutliers: ----------------------------- */
+/* ----------------------------- [hstavg_start_time] - Function to GetPackageHistAvg_StartTime_PerPackageName_Excluding_Outliers: ----------------------------- */
 OUTER APPLY (
             SELECT       --TOP 1 
                          ei.project_name AS [ProjectName]
                         ,ei.package_name AS [PackageName]
-                        ,CONVERT(TIME(0), DATEADD(SECOND, AVG(DATEDIFF(SECOND, 0, CAST(ei_hst_av_strt.start_time AS TIME(0)))), 0)) AS [StartTimeAvg] -- so let's calculate the StartTime AVG no matter if the package runs once daily or not
+                        ,CONVERT(TIME(0), DATEADD(SECOND, AVG( CAST(DATEDIFF(SECOND, 0, CAST(ei_hst_av_strt.start_time AS TIME(0))) AS BIGINT) ), 0)) AS [StartTimeAvg] -- so let's calculate the StartTime AVG no matter if the package runs once daily or not
             
             FROM        [SSISDB].internal.execution_info ei_hst_av_strt WITH (NOLOCK)
             WHERE       1 = 1
             AND         ei_hst_av_strt.project_name = ei.project_name
             AND         ei_hst_av_strt.package_name = ei.package_name
             AND         ei_hst_av_strt.status = 7 /* Success (we want to calculate stats on successfull runs only)   */ 
-            AND         ei_hst_av_strt.start_time >= DATEADD(DAY, @DaysBack, CAST(CAST(@EndDate+1 AS DATE) AS DATETIME)) /* start at midnight next day of @EndDateminus @DaysBack */ 
-            AND         ei_hst_av_strt.end_time < CAST(CAST(@EndDate+1 AS DATE) AS DATETIME) /* stop at midnight next day of @EndDate */
+            AND         ei_hst_av_strt.start_time >= @StartDate
+            AND         ei_hst_av_strt.end_time < @EndDate
             /* Here we are excluding start-time outliers: */
             AND         CAST(ei_hst_av_strt.start_time AS TIME(0)) >= prcnt.TimeStart_PercLower
             AND         CAST(ei_hst_av_strt.start_time AS TIME(0)) <= prcnt.TimeStart_PercUpper
