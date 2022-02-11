@@ -3,19 +3,20 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # SQL Server Management Studio Solution File, Format Version 18.00
 VisualStudioVersion = 15.0.28307.421
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "sp_WhoIsActive_inSSIS", "sp_WhoIsActive_inSSIS.ssmssqlproj", "{1552E87B-CDC5-4EA8-8323-FF7383C06209}"
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "sp_WhoIsActive_inSSIS", "sp_WhoIsActive_inSSIS.ssmssqlproj", "{A56936A9-8549-4E68-8ADA-87B0442BE527}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Default|Default = Default|Default
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{1552E87B-CDC5-4EA8-8323-FF7383C06209}.Default|Default.ActiveCfg = Default
+		{A56936A9-8549-4E68-8ADA-87B0442BE527}.Default|Default.ActiveCfg = Default
+		{788860CA-4668-46DA-9838-E82B0A54493E}.Default|Default.ActiveCfg = Default
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
-		SolutionGuid = {CE67C42F-9997-4087-B6DC-7CEE73D9EC36}
+		SolutionGuid = {5DFB42F1-960A-4B2F-9019-8C0E11D19497}
 	EndGlobalSection
 EndGlobal
